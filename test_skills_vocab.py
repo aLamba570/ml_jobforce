@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 
 def test_skills_vocabulary(file_path):
     """Test that the skills vocabulary file is properly formatted"""
