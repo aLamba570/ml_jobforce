@@ -43,21 +43,45 @@ except FileNotFoundError:
 # Flatten skills for faster lookup
 ALL_SKILLS = set(SKILLS_DB.get("technical_skills", []) + SKILLS_DB.get("soft_skills", []))
 
-def extract_text_from_pdf(pdf_file):
+def extract_text_from_pdf(pdf_path):
     """Extract text from a PDF file"""
-    reader = PdfReader(pdf_file)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() + "\n"
-    return text
+    try:
+        print(f"Opening PDF file: {pdf_path}")
+        pdf_file_exists = os.path.isfile(pdf_path)
+        print(f"File exists: {pdf_file_exists}")
+        
+        if not pdf_file_exists:
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+        
+        reader = PdfReader(pdf_path)
+        text = ""
+        for page in reader.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+        
+        print(f"Extracted {len(text)} characters from PDF")
+        return text
+    except Exception as e:
+        print(f"Error extracting text from PDF: {str(e)}")
+        raise
 
-def extract_text_from_docx(docx_file):
+def extract_text_from_docx(docx_path):
     """Extract text from a DOCX file"""
-    doc = docx.Document(docx_file)
-    text = []
-    for paragraph in doc.paragraphs:
-        text.append(paragraph.text)
-    return '\n'.join(text)
+    try:
+        print(f"Opening DOCX file: {docx_path}")
+        doc = docx.Document(docx_path)
+        text = []
+        for paragraph in doc.paragraphs:
+            if paragraph.text:
+                text.append(paragraph.text)
+        
+        result = '\n'.join(text)
+        print(f"Extracted {len(result)} characters from DOCX")
+        return result
+    except Exception as e:
+        print(f"Error extracting text from DOCX: {str(e)}")
+        raise
 
 def preprocess_text(text):
     """Preprocess text by removing special characters and normalizing"""
@@ -77,76 +101,55 @@ def extract_skills_from_text(text):
     Extract skills from text using NLP techniques
     Returns a dictionary with categorized skills and additional metadata
     """
+    # For debugging
+    print(f"Extracting skills from text: {text[:100]}...")
+    
     # Preprocess text
-    preprocessed_text = preprocess_text(text)
+    processed_text = preprocess_text(text) if preprocess_text else text.lower()
     
-    # Extract skills using spaCy NER and pattern matching
-    technical_skills = set()
-    soft_skills = set()
-    job_titles = set()
-    industries = set()
+    # Extract skills using the skills vocabulary
+    technical_skills = []
+    soft_skills = []
     
-    # 1. Direct pattern matching with skills database
-    for skill in SKILLS_DB.get("technical_skills", []):
-        if re.search(r'\b' + re.escape(skill) + r'\b', preprocessed_text):
-            technical_skills.add(skill)
-            
-    for skill in SKILLS_DB.get("soft_skills", []):
-        if re.search(r'\b' + re.escape(skill) + r'\b', preprocessed_text):
-            soft_skills.add(skill)
-    
-    # 2. Extract job titles
-    for title in JOB_TITLES:
-        if re.search(r'\b' + re.escape(title.lower()) + r'\b', preprocessed_text):
-            job_titles.add(title)
-    
-    # 3. Extract industry keywords
-    for industry in INDUSTRY_KEYWORDS:
-        if re.search(r'\b' + re.escape(industry.lower()) + r'\b', preprocessed_text):
-            industries.add(industry)
-    
-    # 4. Use spaCy for named entity recognition and phrase extraction
-    doc = nlp(preprocessed_text)
-    
-    # Extract entities that could be skills, job titles, or industries
-    for ent in doc.ents:
-        if ent.label_ in ["ORG", "PRODUCT"]:
-            entity_text = ent.text.lower()
-            
-            # Check if entity contains a skill
-            for skill in ALL_SKILLS:
-                if skill in entity_text:
-                    if skill in SKILLS_DB.get("technical_skills", []):
-                        technical_skills.add(skill)
-                    else:
-                        soft_skills.add(skill)
-    
-    # 5. Extract noun phrases as potential skills
-    for chunk in doc.noun_chunks:
-        chunk_text = chunk.text.lower()
+    # If we have skills databases
+    if ALL_SKILLS:
+        # Simple keyword matching for testing
+        words = set(processed_text.split())
         
-        # Check if chunk contains a skill
-        for skill in ALL_SKILLS:
-            if skill in chunk_text:
-                if skill in SKILLS_DB.get("technical_skills", []):
-                    technical_skills.add(skill)
-                else:
-                    soft_skills.add(skill)
+        # Match against technical skills
+        for skill in SKILLS_DB.get("technical_skills", []):
+            if skill.lower() in processed_text:
+                technical_skills.append(skill)
+                
+        # Match against soft skills
+        for skill in SKILLS_DB.get("soft_skills", []):
+            if skill.lower() in processed_text:
+                soft_skills.append(skill)
+    else:
+        # Fallback skills for testing when no vocabulary is available
+        print("Warning: Using fallback skills detection")
+        common_tech_skills = ["javascript", "python", "java", "c++", "react", "angular", 
+                              "node.js", "express", "mongodb", "sql", "aws", "docker", "kubernetes"]
+        common_soft_skills = ["communication", "leadership", "teamwork", "problem-solving", 
+                              "creativity", "time management", "adaptability"]
+        
+        # Simple keyword matching
+        for skill in common_tech_skills:
+            if skill.lower() in processed_text:
+                technical_skills.append(skill)
+                
+        for skill in common_soft_skills:
+            if skill.lower() in processed_text:
+                soft_skills.append(skill)
     
-    # 6. Get experience levels from text
-    experience_years = extract_experience_years(text)
+    # Log extracted skills
+    print(f"Extracted technical skills: {technical_skills}")
+    print(f"Extracted soft skills: {soft_skills}")
     
-    # Combine results
-    result = {
-        "technical_skills": list(technical_skills),
-        "soft_skills": list(soft_skills),
-        "job_titles": list(job_titles),
-        "industries": list(industries),
-        "experience_years": experience_years,
-        "all_skills": list(technical_skills.union(soft_skills))
+    return {
+        "technical_skills": technical_skills,
+        "soft_skills": soft_skills
     }
-    
-    return result
 
 def extract_experience_years(text):
     """Extract years of experience from text"""
@@ -159,25 +162,53 @@ def extract_experience_years(text):
     return None
 
 def extract_skills_from_file(file):
-    """Extract skills from a resume file (PDF or DOCX)"""
-    filename = file.filename
-    file_extension = os.path.splitext(filename)[1].lower()
-    
-    # Create in-memory file-like object
-    file_stream = io.BytesIO(file.read())
-    
-    # Extract text based on file type
-    if file_extension == '.pdf':
-        text = extract_text_from_pdf(file_stream)
-    elif file_extension == '.docx':
-        text = extract_text_from_docx(file_stream)
-    else:
-        raise ValueError(f"Unsupported file format: {file_extension}")
-    
-    # Extract skills from the text
-    skills_data = extract_skills_from_text(text)
-    
-    # Add the raw text for future processing
-    skills_data["raw_text"] = text
-    
-    return skills_data
+    """Extract skills from a file (PDF or DOCX)"""
+    try:
+        # Determine file type and extract text
+        filename = file.filename
+        file_extension = os.path.splitext(filename)[1].lower()
+        
+        # Use a Windows-compatible temp directory
+        import tempfile
+        temp_dir = tempfile.gettempdir()  # This will work on all platforms
+        temp_filename = f"resume_{os.urandom(8).hex()}{file_extension}"
+        temp_filepath = os.path.join(temp_dir, temp_filename)
+        
+        print(f"Using temp directory: {temp_dir}")
+        print(f"Saving file to: {temp_filepath}")
+        
+        # Save to temporary file for processing
+        file.save(temp_filepath)
+        print(f"File saved successfully to {temp_filepath}")
+        
+        # Extract text based on file type
+        if file_extension == '.pdf':
+            text = extract_text_from_pdf(temp_filepath)
+        elif file_extension == '.docx':
+            text = extract_text_from_docx(temp_filepath)
+        else:
+            # Should never reach here due to earlier validation
+            raise ValueError(f"Unsupported file format: {file_extension}")
+            
+        print(f"Extracted text from file ({len(text)} characters)")
+        
+        # Clean up temp file
+        try:
+            os.remove(temp_filepath)
+            print(f"Temp file removed: {temp_filepath}")
+        except Exception as e:
+            print(f"Warning: Failed to remove temp file: {e}")
+            
+        # Process the extracted text
+        if not text:
+            print("Warning: No text extracted from file")
+            return {"technical_skills": [], "soft_skills": []}
+            
+        # Use the existing text processing function
+        return extract_skills_from_text(text)
+        
+    except Exception as e:
+        import traceback
+        print(f"Error in extract_skills_from_file: {str(e)}")
+        print(traceback.format_exc())
+        raise

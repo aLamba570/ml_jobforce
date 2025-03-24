@@ -29,10 +29,10 @@ def connect_to_mongodb():
     try:
         client = pymongo.MongoClient(MONGO_URI)
         db = client[DB_NAME]
-        return db
+        return db  # Return the database object
     except Exception as e:
         print(f"Error connecting to MongoDB: {e}")
-        return None
+        return None  # Explicitly return None if connection fails
 
 def preprocess_job_description(job_description):
     """Preprocess job description text for better matching"""
@@ -49,7 +49,8 @@ def preprocess_job_description(job_description):
 def get_jobs_from_db(skills=None, limit=50):
     """Get jobs from MongoDB database, filtered by skills if provided"""
     db = connect_to_mongodb()
-    if not db:
+    if db is None:  # Explicitly check if the database connection failed
+        print("Database connection failed.")
         return []
         
     jobs_collection = db['jobs']
@@ -86,7 +87,7 @@ def match_jobs_to_skills(skills, limit=10):
     
     # If not enough jobs in DB, scrape some new ones
     if len(db_jobs) < 20:
-        scraped_jobs = scrape_jobs_by_skills(skills, limit=50)
+        scraped_jobs = scrape_jobs_by_skills(skills, limit=100)
         
         # Save scraped jobs to DB
         if scraped_jobs:

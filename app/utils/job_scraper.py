@@ -23,9 +23,9 @@ SOURCES = {
 
 # API keys for job APIs (for demonstration, using free tier limits)
 API_KEYS = {
-    'jooble': os.environ.get('JOOBLE_API_KEY', ''),
+    'jooble': os.environ.get('JOOBLE_API_KEY', '62936976-168b-427b-ba84-3514af0f7962'),
     'adzuna': os.environ.get('ADZUNA_API_KEY', 'c9ec64f6690cb1c018793c0c8e6d8c98'),
-    'jsearch': os.environ.get('JSEARCH_API_KEY', '')
+    'jsearch': os.environ.get('JSEARCH_API_KEY', '4e55afc2a1msh0e03a079e1dd351p143f53jsn08519e111e8b')
 }
 
 def scrape_remoteok():
@@ -45,6 +45,13 @@ def scrape_remoteok():
                     # Extract skills from job description
                     skills_data = extract_skills_from_text(job.get('description', ''))
                     
+                    # Safely parse the 'date' field
+                    try:
+                        date = int(job.get('date', 0))  # Convert to integer
+                        posted_at = datetime.fromtimestamp(date)
+                    except (ValueError, TypeError):
+                        posted_at = None  # Default to None if invalid
+                    
                     processed_job = {
                         'title': job.get('position', ''),
                         'company': job.get('company', ''),
@@ -54,7 +61,7 @@ def scrape_remoteok():
                         'source': 'remoteok',
                         'sourceId': job.get('id', ''),
                         'skills': skills_data.get('all_skills', []),
-                        'postedAt': datetime.fromtimestamp(job.get('date', 0)),
+                        'postedAt': posted_at,
                         'scrapedAt': datetime.now()
                     }
                     processed_jobs.append(processed_job)
@@ -224,22 +231,69 @@ def scrape_all_jobs():
     
     return all_jobs
 
-def scrape_jobs_by_skills(skills, limit=50):
+def scrape_jobs_by_skills(skills, limit=100):
     """Scrape jobs related to specific skills"""
     all_jobs = []
     
     # Convert skills to comma-separated string for queries
     skill_query = ', '.join(skills[:3])  # Use top 3 skills to avoid query being too long
     
-    # Get jobs from JSearch
-    jsearch_jobs = fetch_jsearch_jobs(query=skill_query, limit=limit//2)
-    all_jobs.extend(jsearch_jobs)
+    print(f"Scraping jobs for query: {skill_query}, limit: {limit}")
     
-    # Get jobs from Jooble
-    jooble_jobs = fetch_jooble_jobs(query=skill_query, page=1)
-    all_jobs.extend(jooble_jobs)
+    try:
+        # Get jobs from JSearch with increased limit
+        jsearch_jobs = fetch_jsearch_jobs(query=skill_query, limit=limit//2)
+        print(f"JSearch returned {len(jsearch_jobs)} jobs")
+        all_jobs.extend(jsearch_jobs)
+    except Exception as e:
+        print(f"Error fetching from JSearch: {e}")
     
-    # Limit results
+    try:
+        # Get jobs from Jooble with multiple pages
+        for page in range(1, 3):  # Fetch from pages 1 and 2
+            jooble_jobs = fetch_jooble_jobs(query=skill_query, page=page)
+            print(f"Jooble page {page} returned {len(jooble_jobs)} jobs")
+            all_jobs.extend(jooble_jobs)
+            time.sleep(1)  # Avoid rate limiting
+    except Exception as e:
+        print(f"Error fetching from Jooble: {e}")
+    
+    # Add jobs from other sources if available
+    try:
+        remoteok_jobs = scrape_remoteok()
+        print(f"RemoteOK returned {len(remoteok_jobs)} jobs")
+        all_jobs.extend(remoteok_jobs)
+    except Exception as e:
+        print(f"Error fetching from RemoteOK: {e}")
+    
+    try:
+        weworkremotely_jobs = scrape_weworkremotely()
+        print(f"WeWorkRemotely returned {len(weworkremotely_jobs)} jobs")
+        all_jobs.extend(weworkremotely_jobs)
+    except Exception as e:
+        print(f"Error fetching from WeWorkRemotely: {e}")
+    
+    # Extract skills for jobs that don't have them
+    from app.models.skill_extractor import extract_skills_from_text
+    
+    for job in all_jobs:
+        if not job.get('skills') and job.get('description'):
+            try:
+                extracted_skills = extract_skills_from_text(job['description'])
+                if isinstance(extracted_skills, dict) and 'all_skills' in extracted_skills:
+                    job['skills'] = extracted_skills['all_skills']
+                elif isinstance(extracted_skills, list):
+                    job['skills'] = extracted_skills
+                else:
+                    # Default to empty list
+                    job['skills'] = []
+            except Exception as e:
+                print(f"Error extracting skills from job: {e}")
+                job['skills'] = []
+    
+    print(f"Total jobs scraped: {len(all_jobs)}")
+    
+    # Return all jobs up to the limit
     return all_jobs[:limit]
 
 if __name__ == '__main__':
