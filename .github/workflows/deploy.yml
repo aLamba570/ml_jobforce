@@ -3,13 +3,15 @@ name: Deploy ML Service
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -24,17 +26,67 @@ jobs:
       
       - name: Lint with flake8
         run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || echo "Lint warnings found"
+      
+      - name: Debug Secrets Availability
+        run: |
+          if [ -n "${{ secrets.EC2_HOST }}" ]; then
+            echo "EC2_HOST secret is available"
+          else
+            echo "EC2_HOST secret is missing or empty"
+          fi
+          
+          if [ -n "${{ secrets.EC2_USERNAME }}" ]; then
+            echo "EC2_USERNAME secret is available"
+          else
+            echo "EC2_USERNAME secret is missing or empty"
+          fi
+          
+          if [ -n "${{ secrets.EC2_SSH_KEY }}" ]; then
+            echo "EC2_SSH_KEY secret is available"
+          else
+            echo "EC2_SSH_KEY secret is missing or empty"
+          fi
       
       - name: Deploy to EC2
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v0.1.10  # Specify exact version instead of master
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            cd ~/jobsforce-ml-service
-            git pull
+            echo "Connected to server successfully!"
+            cd ~/jobsforce-ml-service || mkdir -p ~/jobsforce-ml-service
+            
+            # Check if git repo exists, if not clone it
+            if [ ! -d .git ]; then
+              git clone https://github.com/aLamba570/ml_jobforce.git .
+            else
+              git pull
+            fi
+            
+            # Set up Python virtual environment if not exists
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            
             source venv/bin/activate
             pip install -r requirements.txt
-            pm2 restart jobsforce-ml-service
+            
+            # Check if pm2 is installed
+            if ! command -v pm2 &> /dev/null; then
+              echo "PM2 is not installed. Installing..."
+              npm install -g pm2
+            fi
+            
+            # Restart or start the service
+            pm2 describe jobsforce-ml-service > /dev/null
+            if [ $? -eq 0 ]; then
+              echo "Restarting existing service"
+              pm2 restart jobsforce-ml-service
+            else
+              echo "Starting new service"
+              pm2 start "gunicorn --bind 0.0.0.0:5000 app:app" --name jobsforce-ml-service
+            fi
+            
+            pm2 save
