@@ -1,116 +1,30 @@
-name: Deploy ML Service
+echo "Setting up ML Service..."
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:  # Allows manual triggering
+# Create PM2 ecosystem file
+echo 'module.exports = {
+  apps: [{
+    name: "jobsforce-ml-service",
+    script: "./venv/bin/gunicorn",
+    args: "app:app --bind 0.0.0.0:5000 --workers=1",
+    interpreter: "/usr/bin/python3",
+    env: {
+      NODE_ENV: "production",
+      PYTHONUNBUFFERED: "true"
+    },
+    watch: false,
+    max_memory_restart: "500M"
+  }]
+}' > ecosystem.config.js
 
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install flake8 pytest
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      
-      - name: Lint with flake8
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || echo "Lint warnings found"
-      
-      - name: Debug Secrets Availability
-        run: |
-          if [ -n "${{ secrets.EC2_HOST }}" ]; then
-            echo "EC2_HOST secret is available"
-          else
-            echo "EC2_HOST secret is missing or empty"
-          fi
-          
-          if [ -n "${{ secrets.EC2_USERNAME }}" ]; then
-            echo "EC2_USERNAME secret is available"
-          else
-            echo "EC2_USERNAME secret is missing or empty"
-          fi
-          
-          if [ -n "${{ secrets.EC2_SSH_KEY }}" ]; then
-            echo "EC2_SSH_KEY secret is available"
-          else
-            echo "EC2_SSH_KEY secret is missing or empty"
-          fi
-      
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@v0.1.10
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script_stop: true # Stop on first error
-          script: |
-            echo "Connected to server successfully!"
-            mkdir -p ~/jobsforce-ml-service
-            cd ~/jobsforce-ml-service
-            
-            # Check if git repo exists, if not clone it
-            if [ -d .git ]; then
-              echo "Git repository exists, pulling latest changes..."
-              git fetch --all
-              git reset --hard origin/main
-            else
-              echo "Cloning repository for the first time..."
-              git clone https://github.com/aLamba570/ml_jobforce.git .
-            fi
-            
-            # Set up Python virtual environment if not exists
-            if [ ! -d "venv" ]; then
-              echo "Setting up Python virtual environment..."
-              python3 -m venv venv
-            fi
-            
-            echo "Activating virtual environment and installing dependencies..."
-            source venv/bin/activate
-            pip install -r requirements.txt
-            
-            # Install spaCy model if used
-            if grep -q "spacy" requirements.txt; then
-              echo "Installing spaCy model..."
-              python -m spacy download en_core_web_md || echo "spaCy model installation failed, continuing..."
-            fi
-            
-            # Check if pm2 is installed
-            if ! command -v pm2 &> /dev/null; then
-              echo "PM2 is not installed. Installing..."
-              sudo npm install -g pm2
-            fi
-            
-            # Create a pm2 config file if not exists
-            if [ ! -f "ecosystem.config.js" ]; then
-              echo "Creating PM2 ecosystem config..."
-              echo "module.exports = {
-                apps: [{
-                  name: 'jobsforce-ml-service',
-                  script: 'gunicorn',
-                  args: '--workers=2 --bind=0.0.0.0:5000 app:app',
-                  interpreter: './venv/bin/python',
-                  env: {
-                    NODE_ENV: 'production',
-                    PYTHONUNBUFFERED: 'true'
-                  }
-                }]
-              }" > ecosystem.config.js
-            fi
-            
-            echo "Starting/restarting the service with PM2..."
-            pm2 startOrRestart ecosystem.config.js
-            pm2 save
-            
-            echo "Deployment completed successfully!"
+# Start/restart the application with PM2
+if pm2 list | grep -q "jobsforce-ml-service"; then
+  echo "Restarting existing service..."
+  pm2 restart jobsforce-ml-service
+else
+  echo "Starting new service..."
+  pm2 start ecosystem.config.js
+fi
+
+pm2 save
+
+echo "Setup complete!"
