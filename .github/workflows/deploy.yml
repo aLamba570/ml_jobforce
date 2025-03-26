@@ -49,44 +49,68 @@ jobs:
           fi
       
       - name: Deploy to EC2
-        uses: appleboy/ssh-action@v0.1.10  # Specify exact version instead of master
+        uses: appleboy/ssh-action@v0.1.10
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          script_stop: true # Stop on first error
           script: |
             echo "Connected to server successfully!"
-            cd ~/jobsforce-ml-service || mkdir -p ~/jobsforce-ml-service
+            mkdir -p ~/jobsforce-ml-service
+            cd ~/jobsforce-ml-service
             
             # Check if git repo exists, if not clone it
-            if [ ! -d .git ]; then
-              git clone https://github.com/aLamba570/ml_jobforce.git .
+            if [ -d .git ]; then
+              echo "Git repository exists, pulling latest changes..."
+              git fetch --all
+              git reset --hard origin/main
             else
-              git pull
+              echo "Cloning repository for the first time..."
+              git clone https://github.com/aLamba570/ml_jobforce.git .
             fi
             
             # Set up Python virtual environment if not exists
             if [ ! -d "venv" ]; then
+              echo "Setting up Python virtual environment..."
               python3 -m venv venv
             fi
             
+            echo "Activating virtual environment and installing dependencies..."
             source venv/bin/activate
             pip install -r requirements.txt
+            
+            # Install spaCy model if used
+            if grep -q "spacy" requirements.txt; then
+              echo "Installing spaCy model..."
+              python -m spacy download en_core_web_md || echo "spaCy model installation failed, continuing..."
+            fi
             
             # Check if pm2 is installed
             if ! command -v pm2 &> /dev/null; then
               echo "PM2 is not installed. Installing..."
-              npm install -g pm2
+              sudo npm install -g pm2
             fi
             
-            # Restart or start the service
-            pm2 describe jobsforce-ml-service > /dev/null
-            if [ $? -eq 0 ]; then
-              echo "Restarting existing service"
-              pm2 restart jobsforce-ml-service
-            else
-              echo "Starting new service"
-              pm2 start "gunicorn --bind 0.0.0.0:5000 app:app" --name jobsforce-ml-service
+            # Create a pm2 config file if not exists
+            if [ ! -f "ecosystem.config.js" ]; then
+              echo "Creating PM2 ecosystem config..."
+              echo "module.exports = {
+                apps: [{
+                  name: 'jobsforce-ml-service',
+                  script: 'gunicorn',
+                  args: '--workers=2 --bind=0.0.0.0:5000 app:app',
+                  interpreter: './venv/bin/python',
+                  env: {
+                    NODE_ENV: 'production',
+                    PYTHONUNBUFFERED: 'true'
+                  }
+                }]
+              }" > ecosystem.config.js
             fi
             
+            echo "Starting/restarting the service with PM2..."
+            pm2 startOrRestart ecosystem.config.js
             pm2 save
+            
+            echo "Deployment completed successfully!"
