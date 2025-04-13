@@ -49,8 +49,8 @@ JobsForce is an intelligent job recommendation platform that uses advanced algor
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/alamba570/jobsforce-recommendation-system.git
-cd jobsforce-recommendation-system
+git clone https://github.com/alamba570/ml_jobforce.git
+cd ml_jobforce
 ```
 
 ### 2. Backend Setup
